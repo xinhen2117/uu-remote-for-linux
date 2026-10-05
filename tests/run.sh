@@ -112,6 +112,8 @@ check "NVENC Wine bridge builder syntax" bash -n \
     "$project_root/scripts/build-nvencode-bridge.sh"
 check "nvcuda Wine bridge builder syntax" bash -n \
     "$project_root/scripts/build-nvcuda-bridge.sh"
+check "experimental nvcuda source overlay and probe compilation" \
+    "$project_root/tests/nvcuda-staging-source.sh"
 check "update blocker builder syntax" bash -n \
     "$project_root/scripts/build-update-blocker.sh"
 check "input hook builder syntax" bash -n \

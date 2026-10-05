@@ -8,3 +8,4 @@ dist/
 .env
 .env.*
 wineprefix/
+/build/nvcuda-staging/

@@ -4,7 +4,16 @@ set -euo pipefail
 project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 readonly project_root
 readonly archive="$project_root/third_party/sources/nvcuda-uu-remote-v0.8.tar.xz"
-readonly destination="$project_root/lib/uu-remote-for-linux/hwdecode/wine"
+destination="$project_root/lib/uu-remote-for-linux/hwdecode/wine"
+staging_upload=false
+if [[ $# == 2 && -n $2 && ( $1 == --staging-upload || $1 == --output-directory ) ]]; then
+    [[ $1 != --staging-upload ]] || staging_upload=true
+    destination=$2
+elif [[ $# != 0 ]]; then
+    printf 'Usage: %s [--staging-upload|--output-directory OUTPUT_DIRECTORY]\n' "$0" >&2
+    exit 2
+fi
+readonly destination staging_upload
 
 for command_name in meson ninja strip readelf; do
     command -v "$command_name" >/dev/null 2>&1 || {
@@ -17,6 +26,12 @@ build_root=$(mktemp -d "${TMPDIR:-/tmp}/uu-remote-nvcuda.XXXXXX")
 trap 'rm -rf -- "$build_root"' EXIT
 tar -xf "$archive" -C "$build_root"
 source_root="$build_root/nvcuda-uu-remote-v0.8"
+if $staging_upload; then
+    # Apply the readable overlay to the pinned LGPL source, without replacing
+    # the archive or the default release payload.
+    patch --batch --fuzz=0 -p1 -d "$source_root" \
+        < "$project_root/third_party/nvcuda/staging-upload.patch"
+fi
 
 meson setup \
     --cross-file "$source_root/build-wine64.txt" \

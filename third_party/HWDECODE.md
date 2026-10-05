@@ -114,3 +114,13 @@ The Win64 end-to-end probe additionally needs MinGW-w64 and
 The Wine CUDA/CUVID relays and this modification are
 LGPL-2.1-or-later. DXVK is under the zlib license. Debian packages install the
 license texts under `/usr/share/doc/uu-remote-for-linux/licenses/`.
+
+## Optional staging-upload experiment
+
+A readable, opt-in overlay for the pinned nvcuda source is documented in
+[`nvcuda/README.md`](nvcuda/README.md). `make nvcuda-staging-bridge` builds into
+`build/nvcuda-staging/wine`, leaving the bundled release payload unchanged.
+The experimental relay can use mapped D3D11 staging textures instead of the
+heap-buffer/UpdateSubresource upload. It retains CPU copyback and explicit
+producer submission. Standalone GPU regression tests and upload benchmarks
+are included; full wrapper validation is still required before shipping it.

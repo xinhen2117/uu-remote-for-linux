@@ -1,6 +1,6 @@
 SHELL := /usr/bin/env bash
 
-.PHONY: all shim nvdec-probe dxgi-probe nvenc-probe nvcuda-bridge nvencode-bridge update-blocker input-hook frame-helper pipewire-capture pipewire-cursor powershell-bridge test deb release-assets clean
+.PHONY: all shim nvdec-probe dxgi-probe nvenc-probe nvcuda-bridge nvcuda-staging-bridge nvencode-bridge update-blocker input-hook frame-helper pipewire-capture pipewire-cursor powershell-bridge test deb release-assets clean
 
 all: test
 
@@ -18,6 +18,9 @@ nvenc-probe:
 
 nvcuda-bridge:
 	./scripts/build-nvcuda-bridge.sh
+
+nvcuda-staging-bridge:
+	./scripts/build-nvcuda-bridge.sh --staging-upload build/nvcuda-staging/wine
 
 nvencode-bridge:
 	./scripts/build-nvencode-bridge.sh

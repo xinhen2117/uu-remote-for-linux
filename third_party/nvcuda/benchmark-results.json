@@ -1,0 +1,122 @@
+{
+  "metadata": {
+    "date": "2026-10-05",
+    "upstream_commit": "faddf412c54ea27d8d51d223355cbde2cfb4d7a0",
+    "source_archive_sha256": "dce82cfceceea34546119742f914d3306a3cf794fd710c640c5f4e0a5e73ed33",
+    "overlay_sha256": "12f50660e1c7e48d648d4393a4d2f06c401be321139a9b41b8500d847ebd1390",
+    "baseline_relay_sha256": "e64aaeb52cac553c09f9518dab3f90e37d313406a5cdf972e8f70550021a12a5",
+    "experimental_relay_sha256": "62f84635b44db50ad25d670155859744eedc19aed8023c89e264f00e128af65b",
+    "gpu": "NVIDIA GeForce RTX 2080 Ti",
+    "driver": "595.91.07",
+    "cpu": "AMD Ryzen 7 5800X",
+    "os": "Ubuntu 26.04.1",
+    "session": "GNOME Wayland / XWayland",
+    "wine": "11.0",
+    "dxvk": "3.0.2",
+    "compiler": "GCC 15.2.0 (relay), MinGW-w64 GCC 13.2.0 (fixture)",
+    "build": "Meson release; pinned source and overlay built with the same toolchain",
+    "format": "R8_UNORM",
+    "width": 3456,
+    "height": 1440,
+    "warmup_frames": 30,
+    "measured_frames": 240,
+    "verification": "every byte of every frame read on a second D3D11 device after a producer event fence",
+    "other_gpu_tests_running": false
+  },
+  "series": [
+    {
+      "name": "isolated series A",
+      "runs": [
+        {
+          "run": 1,
+          "mode": "baseline",
+          "mean_bridge_ms": 1.1093,
+          "mean_ready_ms": 1.6946,
+          "max_bridge_ms": 3.1946
+        },
+        {
+          "run": 2,
+          "mode": "staging",
+          "mean_bridge_ms": 0.6557,
+          "mean_ready_ms": 1.2437,
+          "max_bridge_ms": 1.907
+        },
+        {
+          "run": 3,
+          "mode": "staging",
+          "mean_bridge_ms": 0.6738,
+          "mean_ready_ms": 1.2701,
+          "max_bridge_ms": 1.9048
+        },
+        {
+          "run": 4,
+          "mode": "baseline",
+          "mean_bridge_ms": 1.1455,
+          "mean_ready_ms": 1.746,
+          "max_bridge_ms": 2.5632
+        },
+        {
+          "run": 5,
+          "mode": "baseline",
+          "mean_bridge_ms": 1.1403,
+          "mean_ready_ms": 1.7474,
+          "max_bridge_ms": 2.6577
+        },
+        {
+          "run": 6,
+          "mode": "staging",
+          "mean_bridge_ms": 0.6585,
+          "mean_ready_ms": 1.2475,
+          "max_bridge_ms": 1.9711
+        }
+      ]
+    },
+    {
+      "name": "fixture driver series B",
+      "runs": [
+        {
+          "run": 1,
+          "mode": "baseline",
+          "mean_bridge_ms": 1.1022,
+          "mean_ready_ms": 1.6938,
+          "max_bridge_ms": 2.5436
+        },
+        {
+          "run": 2,
+          "mode": "staging",
+          "mean_bridge_ms": 0.6593,
+          "mean_ready_ms": 1.257,
+          "max_bridge_ms": 2.0656
+        },
+        {
+          "run": 3,
+          "mode": "staging",
+          "mean_bridge_ms": 0.713,
+          "mean_ready_ms": 1.3206,
+          "max_bridge_ms": 2.1945
+        },
+        {
+          "run": 4,
+          "mode": "baseline",
+          "mean_bridge_ms": 1.0269,
+          "mean_ready_ms": 1.6064,
+          "max_bridge_ms": 2.3479
+        },
+        {
+          "run": 5,
+          "mode": "baseline",
+          "mean_bridge_ms": 1.0518,
+          "mean_ready_ms": 1.6335,
+          "max_bridge_ms": 2.9512
+        },
+        {
+          "run": 6,
+          "mode": "staging",
+          "mean_bridge_ms": 0.6465,
+          "mean_ready_ms": 1.2426,
+          "max_bridge_ms": 1.9601
+        }
+      ]
+    }
+  ]
+}

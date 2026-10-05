@@ -1,0 +1,244 @@
+--- a/dlls/nvcuda/nvcuda.c
++++ b/dlls/nvcuda/nvcuda.c
+@@ -59,6 +59,8 @@
+ static const char      devpropkey_gpu_luidA[]        = "Properties\\{60B193CB-5276-4D0F-96FC-F173ABAD3EC6}\\0002";
+ static LONG            num_stream_callbacks;
+ static CUresult (*pcuMemcpy2D_v2)(const CUDA_MEMCPY2D *pCopy);
++static CUresult (*pcuStreamSynchronize)(CUstream hStream);
++static CUresult (*pcuStreamSynchronize_ptsz)(CUstream hStream);
+ 
+ /*
+  * Wine's Linux CUDA relay cannot register a D3D11 resource with CUDA because
+@@ -93,6 +95,10 @@
+     D3D11_TEXTURE2D_DESC desc;
+     struct uu_remote_d3d11_array array;
+     BYTE *staging;
++    ID3D11Texture2D *upload_texture;
++    D3D11_MAPPED_SUBRESOURCE upload_map;
++    BOOL upload_mapped;
++    BOOL upload_initialized;
+     size_t staging_size;
+     size_t row_pitch;
+     unsigned int subresource;
+@@ -183,7 +189,102 @@
+     return CUDA_SUCCESS;
+ }
+ 
+-static CUresult uu_remote_d3d11_bounce_copy(const CUDA_MEMCPY2D *copy)
++/* Opt in per process; the shipped CPU-buffer upload remains the default. */
++static void uu_remote_d3d11_create_upload_texture(struct uu_remote_d3d11_resource *resource)
++{
++    const char *mode = getenv("UU_REMOTE_D3D11_UPLOAD");
++    D3D11_TEXTURE2D_DESC desc = resource->desc;
++    HRESULT hr;
++
++    if (!mode || strcmp(mode, "staging") || desc.MipLevels != 1 ||
++        desc.ArraySize != 1 || desc.SampleDesc.Count != 1)
++        return;
++
++    switch (desc.Format)
++    {
++        case DXGI_FORMAT_R8_UNORM:
++        case DXGI_FORMAT_R8G8_UNORM:
++        case DXGI_FORMAT_R16_UNORM:
++        case DXGI_FORMAT_R16G16_UNORM:
++        case DXGI_FORMAT_AYUV:
++        case DXGI_FORMAT_Y410:
++        case DXGI_FORMAT_Y416:
++        case DXGI_FORMAT_NV12:
++        case DXGI_FORMAT_P010:
++        case DXGI_FORMAT_P016:
++            break;
++        default:
++            return;
++    }
++
++    desc.Usage = D3D11_USAGE_STAGING;
++    desc.BindFlags = 0;
++    desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
++    desc.MiscFlags = 0;
++    hr = ID3D11Device_CreateTexture2D(resource->device, &desc, NULL,
++                                   &resource->upload_texture);
++    if (FAILED(hr))
++        WARN("UU Remote staging upload unavailable (%#lx); using CPU buffer\n", (unsigned long)hr);
++}
++
++static CUresult uu_remote_d3d11_staging_copy(struct uu_remote_d3d11_resource *resource,
++                                          const CUDA_MEMCPY2D *copy)
++{
++    CUDA_MEMCPY2D host_copy = *copy;
++    size_t width = uu_remote_d3d11_default_row_pitch(&resource->desc);
++    size_t rows = uu_remote_d3d11_default_rows(&resource->desc);
++    CUresult result;
++    HRESULT hr;
++    size_t row;
++
++    /* Check additions by subtraction before addressing the mapped allocation. */
++    if (copy->dstXInBytes > width || copy->WidthInBytes > width - copy->dstXInBytes ||
++        copy->dstY > rows || copy->Height > rows - copy->dstY)
++        return CUDA_ERROR_INVALID_VALUE;
++
++    if (!resource->upload_mapped)
++    {
++        hr = ID3D11DeviceContext_Map(resource->context,
++             (ID3D11Resource *)resource->upload_texture, 0, D3D11_MAP_WRITE,
++             0, &resource->upload_map);
++        if (FAILED(hr))
++        {
++            ERR("UU Remote staging upload Map failed (%#lx)\n", (unsigned long)hr);
++            return CUDA_ERROR_UNKNOWN;
++        }
++        resource->upload_mapped = TRUE;
++        if (resource->upload_map.RowPitch < width)
++        {
++            ID3D11DeviceContext_Unmap(resource->context,
++                (ID3D11Resource *)resource->upload_texture, 0);
++            resource->upload_mapped = FALSE;
++            return CUDA_ERROR_INVALID_VALUE;
++        }
++        if (!resource->upload_initialized)
++        {
++            /* Match the zero-initialized CPU buffer on a first partial write. */
++            for (row = 0; row < rows; row++)
++                memset((BYTE *)resource->upload_map.pData + row * resource->upload_map.RowPitch,
++                       0, width);
++            resource->upload_initialized = TRUE;
++        }
++    }
++
++    host_copy.dstMemoryType = UU_REMOTE_CU_MEMORYTYPE_HOST;
++    host_copy.dstHost = resource->upload_map.pData;
++    host_copy.dstDevice = 0;
++    host_copy.dstArray = NULL;
++    host_copy.dstPitch = resource->upload_map.RowPitch;
++    result = pcuMemcpy2D_v2(&host_copy);
++    if (result == CUDA_SUCCESS)
++        resource->dirty = TRUE;
++    TRACE("UU Remote staging copy format=%u pitch=%u result=%d\n",
++          resource->desc.Format, resource->upload_map.RowPitch, result);
++    return result;
++}
++
++static CUresult uu_remote_d3d11_bounce_copy(const CUDA_MEMCPY2D *copy, CUstream stream,
++                                        CUresult (*synchronize)(CUstream))
+ {
+     struct uu_remote_d3d11_array *array;
+     struct uu_remote_d3d11_resource *resource;
+@@ -197,6 +298,14 @@
+     array = uu_remote_d3d11_array_from_cuda(copy->dstArray);
+     if (!array || !(resource = array->owner) || !resource->mapped)
+         return CUDA_ERROR_INVALID_VALUE;
++
++    if (resource->upload_texture)
++    {
++        /* A synchronous copy alone does not order a nonblocking producer stream. */
++        if (synchronize && (result = synchronize(stream)) != CUDA_SUCCESS)
++            return result;
++        return uu_remote_d3d11_staging_copy(resource, copy);
++    }
+ 
+     row_pitch = resource->row_pitch;
+     if (row_pitch < copy->dstXInBytes + copy->WidthInBytes)
+@@ -521,7 +630,6 @@
+ static CUresult (*pcuStreamGetFlags)(CUstream hStream, unsigned int *flags);
+ static CUresult (*pcuStreamGetPriority)(CUstream hStream, int *priority);
+ static CUresult (*pcuStreamQuery)(CUstream hStream);
+-static CUresult (*pcuStreamSynchronize)(CUstream hStream);
+ static CUresult (*pcuStreamWaitEvent)(CUstream hStream, CUevent hEvent, unsigned int Flags);
+ static CUresult (*pcuSurfObjectCreate)(CUsurfObject *pSurfObject, const CUDA_RESOURCE_DESC *pResDesc);
+ static CUresult (*pcuSurfObjectDestroy)(CUsurfObject surfObject);
+@@ -641,7 +749,6 @@
+ static CUresult (*pcuStreamGetFlags_ptsz)(CUstream hStream, unsigned int *flags);
+ static CUresult (*pcuStreamGetPriority_ptsz)(CUstream hStream, int *priority);
+ static CUresult (*pcuStreamQuery_ptsz)(CUstream hStream);
+-static CUresult (*pcuStreamSynchronize_ptsz)(CUstream hStream);
+ static CUresult (*pcuStreamWaitEvent_ptsz)(CUstream hStream, CUevent hEvent, unsigned int Flags);
+ 
+ /* Cuda 8.0 */
+@@ -2371,12 +2478,21 @@
+             struct uu_remote_d3d11_resource *resource = uu_remote_d3d11_resource_from_cuda(resources[i]);
+             if (resource->dirty)
+             {
+-                ID3D11DeviceContext_UpdateSubresource(resource->context,
+-                    resource->resource, resource->subresource, NULL,
+-                    resource->staging, resource->row_pitch, resource->staging_size);
++                if (resource->upload_texture)
++                {
++                    ID3D11DeviceContext_Unmap(resource->context,
++                        (ID3D11Resource *)resource->upload_texture, 0);
++                    resource->upload_mapped = FALSE;
++                    ID3D11DeviceContext_CopyResource(resource->context,
++                        resource->resource, (ID3D11Resource *)resource->upload_texture);
++                }
++                else
++                    ID3D11DeviceContext_UpdateSubresource(resource->context,
++                        resource->resource, resource->subresource, NULL,
++                        resource->staging, resource->row_pitch, resource->staging_size);
+                 /*
+                  * UU Remote opens the shared texture on a separate D3D11
+-                 * device.  UpdateSubresource only records the upload on the
++                 * device.  Both upload paths only record the upload on the
+                  * producer context; without Flush, DXVK may leave it pending
+                  * indefinitely while the consumer observes the old contents.
+                  * Submit it before CUDA reports that unmapping has completed.
+@@ -2387,6 +2503,12 @@
+                       resource->desc.Height, resource->subresource,
+                       resource->row_pitch, resource->staging_size);
+             }
++            if (resource->upload_mapped)
++            {
++                ID3D11DeviceContext_Unmap(resource->context,
++                    (ID3D11Resource *)resource->upload_texture, 0);
++                resource->upload_mapped = FALSE;
++            }
+             resource->mapped = FALSE;
+             resource->dirty = FALSE;
+         }
+@@ -2405,6 +2527,11 @@
+     {
+         uu_remote_resource->magic = 0;
+         uu_remote_resource->array.magic = 0;
++        if (uu_remote_resource->upload_mapped)
++            ID3D11DeviceContext_Unmap(uu_remote_resource->context,
++                (ID3D11Resource *)uu_remote_resource->upload_texture, 0);
++        if (uu_remote_resource->upload_texture)
++            ID3D11Texture2D_Release(uu_remote_resource->upload_texture);
+         if (uu_remote_resource->staging)
+             HeapFree(GetProcessHeap(), 0, uu_remote_resource->staging);
+         if (uu_remote_resource->context)
+@@ -2655,7 +2782,7 @@
+     TRACE("(%p, %p)\n", pCopy, hStream);
+     if (pCopy && pCopy->dstMemoryType == UU_REMOTE_CU_MEMORYTYPE_ARRAY &&
+         uu_remote_d3d11_array_from_cuda(pCopy->dstArray))
+-        return uu_remote_d3d11_bounce_copy(pCopy);
++        return uu_remote_d3d11_bounce_copy(pCopy, hStream, pcuStreamSynchronize);
+     return pcuMemcpy2DAsync_v2(pCopy, hStream);
+ }
+ 
+@@ -2676,7 +2803,7 @@
+     TRACE("(%p)\n", pCopy);
+     if (pCopy && pCopy->dstMemoryType == UU_REMOTE_CU_MEMORYTYPE_ARRAY &&
+         uu_remote_d3d11_array_from_cuda(pCopy->dstArray))
+-        return uu_remote_d3d11_bounce_copy(pCopy);
++        return uu_remote_d3d11_bounce_copy(pCopy, NULL, NULL);
+     return pcuMemcpy2D_v2(pCopy);
+ }
+ 
+@@ -3746,7 +3873,7 @@
+     TRACE("(%p, %p)\n", pCopy, hStream);
+     if (pCopy && pCopy->dstMemoryType == UU_REMOTE_CU_MEMORYTYPE_ARRAY &&
+         uu_remote_d3d11_array_from_cuda(pCopy->dstArray))
+-        return uu_remote_d3d11_bounce_copy(pCopy);
++        return uu_remote_d3d11_bounce_copy(pCopy, hStream, pcuStreamSynchronize_ptsz);
+     return pcuMemcpy2DAsync_v2_ptsz(pCopy, hStream);
+ }
+ 
+@@ -6879,6 +7006,8 @@
+     if (result != CUDA_SUCCESS)
+         goto failed;
+ 
++    uu_remote_d3d11_create_upload_texture(resource);
++
+     TRACE("UU Remote registered D3D11 texture format=%u size=%ux%u mips=%u array=%u pitch=%zu bytes=%zu\n",
+           resource->desc.Format, resource->desc.Width, resource->desc.Height,
+           resource->desc.MipLevels, resource->desc.ArraySize,
